@@ -10,6 +10,22 @@ Pulls job postings from jasoseol.com (자소설닷컴).
 
 Reruns are resumable: ids already in `data/postings.jsonl` are skipped (`--refresh` to force).
 
+## Browse locally
+
+    python serve.py            # http://localhost:8000
+    python serve.py --port 9000
+
+Stdlib only, no dependencies. Serves `web/index.html` plus `/api/postings.json`
+built from `data/postings.jsonl` (reloaded automatically when the file changes).
+The whole dataset ships once, so search / filter / sort are instant client-side —
+no request per keystroke (Doherty threshold, <400ms).
+
+UI: search across company + posting + role, status chips (Open / Closing in 7 days /
+Closed), sort by deadline / recency / views / role count, a result count that is always
+visible (including zero), one-click filter reset, and an empty state that offers a way out.
+White background, no borders anywhere — grouping comes from fills and spacing, and focus
+is shown by a fill change rather than a ring.
+
 ## Daily automation
 
 `.github/workflows/daily-scrape.yml` runs at **06:10 KST every day** (`10 21 * * *` UTC)

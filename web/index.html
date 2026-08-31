@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>대기업 신입 채용공고</title>
+<style>
+  /* No strokes anywhere: grouping comes from fills and space, never borders. */
+  :root{
+    --bg:#FFFFFF;
+    --fill:#F5F4F2;          /* resting fill for inputs / hovered rows */
+    --fill-strong:#EBE9E5;   /* pressed / focused / active chip */
+    --ink:#0E0E10;
+    --ink-2:rgba(14,14,16,.56);
+    --ink-3:rgba(14,14,16,.36);
+    --urgent:#B4331F;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;border:0;outline:0}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    background:var(--bg);color:var(--ink);
+    font:400 15px/1.45 -apple-system,BlinkMacSystemFont,"Pretendard","Apple SD Gothic Neo",Inter,sans-serif;
+    letter-spacing:-.01em;
+    padding:56px 24px 96px;
+  }
+  .wrap{max-width:880px;margin:0 auto}
+
+  h1{font-size:28px;font-weight:400;letter-spacing:-.03em}
+  .sub{color:var(--ink-3);font-size:13px;margin-top:6px}
+
+  /* ---- controls: sit directly above the collection they affect ---- */
+  .controls{display:flex;flex-direction:column;gap:10px;margin:28px 0 8px}
+  .search{
+    width:100%;background:var(--fill);border-radius:var(--radius);
+    padding:13px 16px;font:inherit;color:var(--ink);
+    transition:background-color .12s cubic-bezier(.4,0,.2,1);
+  }
+  .search::placeholder{color:var(--ink-3)}
+  .search:focus{background:var(--fill-strong)}   /* focus shown by fill, not a ring */
+
+  .row-controls{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .chip{
+    background:transparent;border-radius:999px;padding:7px 13px;
+    font:inherit;font-size:13px;color:var(--ink-2);cursor:pointer;
+    transition:background-color .12s cubic-bezier(.4,0,.2,1),color .12s;
+  }
+  .chip:hover{background:var(--fill)}
+  .chip:focus-visible{background:var(--fill)}
+  .chip[aria-pressed="true"]{background:var(--fill-strong);color:var(--ink)}
+  .spacer{flex:1}
+  select.sort{
+    background:transparent;font:inherit;font-size:13px;color:var(--ink-2);
+    padding:7px 4px;cursor:pointer;border-radius:8px;
+  }
+  select.sort:hover,select.sort:focus{background:var(--fill)}
+
+  .status{display:flex;align-items:baseline;gap:10px;padding:14px 4px 6px}
+  .count{font-size:13px;color:var(--ink-2)}
+  .clear{
+    font:inherit;font-size:13px;color:var(--ink-3);background:transparent;
+    cursor:pointer;padding:2px 6px;border-radius:6px;
+  }
+  .clear:hover{background:var(--fill);color:var(--ink-2)}
+  .clear[hidden]{display:none}
+
+  /* ---- results ---- */
+  ol{list-style:none}
+  .item{display:block;text-decoration:none;color:inherit;border-radius:var(--radius);
+        transition:background-color .12s cubic-bezier(.4,0,.2,1)}
+  .item:hover,.item:focus-visible{background:var(--fill)}
+  .grid{display:grid;grid-template-columns:40px 1fr auto;gap:16px;align-items:center;padding:14px 16px}
+  .logo{width:40px;height:40px;object-fit:contain;border-radius:6px}
+  .logo-fallback{width:40px;height:40px;border-radius:6px;background:var(--fill-strong)}
+  .main{min-width:0}
+  .company{font-size:13px;color:var(--ink-2)}
+  .title{font-size:15px;margin:1px 0 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .roles{font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .meta{text-align:right;white-space:nowrap}
+  .dday{font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  .dday.urgent{color:var(--urgent)}
+  .dday.closed{color:var(--ink-3)}
+  .date{font-size:12px;color:var(--ink-3);margin-top:2px;font-variant-numeric:tabular-nums}
+
+  .empty{padding:64px 16px;text-align:center;color:var(--ink-3);font-size:14px}
+  .empty button{margin-top:14px}
+  .loading{padding:64px 16px;text-align:center;color:var(--ink-3);font-size:14px}
+  .more{display:block;width:100%;background:var(--fill);border-radius:var(--radius);
+        padding:14px;margin-top:8px;font:inherit;font-size:14px;color:var(--ink-2);cursor:pointer}
+  .more:hover{background:var(--fill-strong)}
+  .more[hidden]{display:none}   /* class sets display:block, which would beat [hidden] */
+
+  @media (max-width:560px){
+    body{padding:32px 16px 64px}
+    .grid{grid-template-columns:32px 1fr auto;gap:12px;padding:12px}
+    .logo,.logo-fallback{width:32px;height:32px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>대기업 신입 채용공고</h1>
+    <p class="sub" id="sub">jasoseol.com · 대기업 · 신입</p>
+  </header>
+
+  <div class="controls">
+    <input id="q" class="search" type="search" autocomplete="off"
+           placeholder="Search company, posting, or role — e.g. 반도체, LG, 마케팅"
+           aria-label="Search postings">
+    <div class="row-controls" role="group" aria-label="Filter by status">
+      <button class="chip" data-f="all"    aria-pressed="true">All</button>
+      <button class="chip" data-f="open"   aria-pressed="false">Open</button>
+      <button class="chip" data-f="urgent" aria-pressed="false">Closing in 7 days</button>
+      <button class="chip" data-f="closed" aria-pressed="false">Closed</button>
+      <span class="spacer"></span>
+      <select id="sort" class="sort" aria-label="Sort postings">
+        <option value="deadline">Deadline soonest</option>
+        <option value="newest">Recently opened</option>
+        <option value="views">Most viewed</option>
+        <option value="roles">Most roles</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="status">
+    <span class="count" id="count" aria-live="polite">Loading…</span>
+    <button class="clear" id="clear" hidden>Clear filters</button>
+  </div>
+
+  <ol id="list"><li class="loading">Loading postings…</li></ol>
+  <button class="more" id="more" hidden></button>
+</div>
+
+<script>
+const KST_OFFSET = 9 * 60 * 60 * 1000;
+const PAGE = 60;                       // render in chunks; 580 rows at once is wasted work
+
+let all = [], view = [], shown = PAGE;
+const state = { q: "", f: "all", sort: "deadline" };
+
+const $ = s => document.querySelector(s);
+const list = $("#list"), countEl = $("#count"), clearBtn = $("#clear"), moreBtn = $("#more");
+
+function todayKST(){
+  const now = new Date();
+  const k = new Date(now.getTime() + now.getTimezoneOffset()*60000 + KST_OFFSET);
+  return new Date(k.getFullYear(), k.getMonth(), k.getDate());
+}
+function daysLeft(endISO){
+  if(!endISO) return null;
+  const end = new Date(endISO);
+  if(isNaN(end)) return null;
+  const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  return Math.round((endDay - todayKST()) / 86400000);
+}
+function fmtDate(iso){ return iso ? iso.slice(0,10).replace(/-/g,".").slice(2) : ""; }
+function ddayLabel(d){
+  if(d === null) return {text:"상시", cls:""};
+  if(d < 0)  return {text:"Closed", cls:"closed"};
+  if(d === 0) return {text:"Today", cls:"urgent"};
+  return {text:"D-" + d, cls: d <= 7 ? "urgent" : ""};
+}
+
+function apply(){
+  const q = state.q.trim().toLowerCase();
+  view = all.filter(p => {
+    const d = p._d;
+    if(state.f === "open"   && !(d === null || d >= 0)) return false;
+    if(state.f === "closed" && !(d !== null && d < 0))  return false;
+    if(state.f === "urgent" && !(d !== null && d >= 0 && d <= 7)) return false;
+    return !q || p._hay.includes(q);
+  });
+  const cmp = {
+    deadline: (a,b) => (a._d === null) - (b._d === null) ||
+                       (a._d < 0) - (b._d < 0) || (a._d - b._d),
+    newest:  (a,b) => (b.start_time||"").localeCompare(a.start_time||""),
+    views:   (a,b) => (b.view_count||0) - (a.view_count||0),
+    roles:   (a,b) => b.roles.length - a.roles.length,
+  }[state.sort];
+  view.sort(cmp);
+  shown = PAGE;
+  render();
+}
+
+function render(){
+  const active = state.q || state.f !== "all";
+  countEl.textContent = view.length === all.length
+    ? `${all.length} postings`
+    : `${view.length} of ${all.length} postings`;
+  clearBtn.hidden = !active;
+
+  if(!view.length){
+    list.innerHTML = `<li class="empty">No postings match${state.q ? ` “${escapeHtml(state.q)}”` : ""}.<br>
+      <button class="clear" onclick="window.__clear()">Clear filters</button></li>`;
+    moreBtn.hidden = true;
+    return;
+  }
+
+  const slice = view.slice(0, shown);
+  list.innerHTML = slice.map(p => {
+    const dd = ddayLabel(p._d);
+    return `<li><a class="item" href="${p.url}" target="_blank" rel="noopener">
+      <div class="grid">
+        ${p.image_url
+          ? `<img class="logo" src="${p.image_url}" alt="" loading="lazy" decoding="async"
+                 onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'logo-fallback'}))">`
+          : `<div class="logo-fallback"></div>`}
+        <div class="main">
+          <div class="company">${escapeHtml(p.company||"")}</div>
+          <div class="title">${escapeHtml(p.title||"")}</div>
+          <div class="roles">${p.roles.length ? escapeHtml(p.roles.slice(0,4).join(" · ")) +
+            (p.roles.length > 4 ? ` +${p.roles.length-4}` : "") : "&nbsp;"}</div>
+        </div>
+        <div class="meta">
+          <div class="dday ${dd.cls}">${dd.text}</div>
+          <div class="date">~ ${fmtDate(p.end_time)}</div>
+        </div>
+      </div></a></li>`;
+  }).join("");
+
+  const rest = view.length - shown;
+  moreBtn.hidden = rest <= 0;
+  if(rest > 0) moreBtn.textContent = `Show ${Math.min(rest, PAGE)} more (${rest} left)`;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+window.__clear = () => {
+  state.q = ""; state.f = "all"; $("#q").value = "";
+  document.querySelectorAll(".chip").forEach(c =>
+    c.setAttribute("aria-pressed", String(c.dataset.f === "all")));
+  apply();
+};
+
+$("#q").addEventListener("input", e => { state.q = e.target.value; apply(); });
+$("#sort").addEventListener("change", e => { state.sort = e.target.value; apply(); });
+clearBtn.addEventListener("click", window.__clear);
+moreBtn.addEventListener("click", () => { shown += PAGE; render(); });
+document.querySelectorAll(".chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    state.f = chip.dataset.f;
+    document.querySelectorAll(".chip").forEach(c =>
+      c.setAttribute("aria-pressed", String(c === chip)));
+    apply();
+  });
+});
+
+fetch("/api/postings.json")
+  .then(r => r.ok ? r.json() : Promise.reject(new Error(r.status)))
+  .then(d => {
+    all = d.postings.map(p => ({
+      ...p,
+      _d: daysLeft(p.end_time),
+      _hay: [p.company, p.title, ...(p.roles||[])].join(" ").toLowerCase(),
+    }));
+    const open = all.filter(p => p._d === null || p._d >= 0).length;
+    $("#sub").textContent = `jasoseol.com · 대기업 · 신입 — ${open} open of ${all.length}`;
+    apply();
+  })
+  .catch(err => {
+    list.innerHTML = `<li class="empty">Couldn’t load postings (${escapeHtml(err.message)}).<br>
+      Run <code>python scrape.py --out data</code> first, then reload.</li>`;
+    countEl.textContent = "";
+  });
+</script>
+</body>
+</html>
