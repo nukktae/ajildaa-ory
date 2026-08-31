@@ -16,10 +16,14 @@ Notes:
   - The posting body (`content`) is usually a single <img>; there is no structured
     requirements text. Image URLs are extracted into `content_image_urls`.
   - Reruns are resumable: ids already in postings.jsonl are skipped unless --refresh.
+  - --keep-history retains postings that have dropped out of the search results
+    (closed/expired), so the archive only ever grows. New postings get a
+    first_seen date and are appended to --new-log.
 """
 
 import argparse, csv, json, os, random, re, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import requests
@@ -29,6 +33,7 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML,
 NEXT_RE = re.compile(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
 IMG_SRC_RE = re.compile(r'<img[^>]+src="([^"]+)"', re.I)
 TAG_RE = re.compile(r"<[^>]+>")
+KST = timezone(timedelta(hours=9))
 
 _print_lock = threading.Lock()
 
@@ -70,17 +75,40 @@ def get_next_data(session, url, tries=4, delay=1.0):
 
 # ---------------------------------------------------------------- list phase
 
-def fetch_list_page(session, filters, page, per_page):
+class ListPageError(RuntimeError):
+    """A search page could not be parsed after retries."""
+
+
+def parse_list_page(data):
+    """Pull {data, totalCount} out of a /search page's __NEXT_DATA__.
+
+    The site intermittently server-renders /search with an empty react-query
+    cache; that yields no rows and must be retried, not treated as 'no results'.
+    """
+    queries = (data or {}).get("props", {}).get("pageProps", {}) \
+        .get("dehydratedState", {}).get("queries") or []
+    q = next((x for x in queries if (x.get("queryKey") or [None])[0] == "jobSearch"), None)
+    if q is None:
+        raise ListPageError("no jobSearch query in SSR payload")
+    d = (q.get("state") or {}).get("data") or {}
+    if "data" not in d:
+        raise ListPageError("jobSearch query has no data")
+    return d["data"], d.get("totalCount")
+
+
+def fetch_list_page(session, filters, page, per_page, tries=4, delay=2.0):
     params = dict(filters)
     params.update({"page": page, "perPage": per_page})
     url = f"{BASE}/search?{urlencode(params, doseq=True)}"
-    data = get_next_data(session, url)
-    if not data:
-        return [], None
-    queries = data["props"]["pageProps"]["dehydratedState"]["queries"]
-    q = next((x for x in queries if x["queryKey"][0] == "jobSearch"), queries[0])
-    d = q["state"]["data"]
-    return d["data"], d.get("totalCount")
+    for i in range(tries):
+        try:
+            return parse_list_page(get_next_data(session, url))
+        except ListPageError as e:
+            if i == tries - 1:
+                raise ListPageError(f"page {page}: {e}") from e
+            sleep = delay * (2 ** i) + random.uniform(0, 0.5)
+            log(f"  empty SSR payload on list page {page} ({e}); retry in {sleep:.1f}s")
+            time.sleep(sleep)
 
 
 def fetch_all_listings(session, filters, per_page, delay, limit=None):
@@ -143,7 +171,7 @@ POSTING_COLS = [
     "is_receive_applicant", "view_count", "favorite_count", "homepage_count",
     "resumes_count", "company_group_id", "chat_id", "role_count", "roles",
     "image_url", "content_image_count", "content_image_urls",
-    "attached_file_url", "created_at", "opened_at",
+    "attached_file_url", "created_at", "opened_at", "first_seen",
 ]
 
 
@@ -212,6 +240,23 @@ def download_images(session, records, out_dir, workers, delay):
     log(f"images: {len(jobs)} referenced -> {img_dir}")
 
 
+def append_new_log(path, new_records, today):
+    """Append one row per newly discovered posting to a running CSV log."""
+    if not new_records:
+        return
+    exists = os.path.exists(path) and os.path.getsize(path) > 0
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        if not exists:
+            w.writerow(["first_seen", "id", "company", "title", "start_time",
+                        "end_time", "role_count", "url"])
+        for r in sorted(new_records, key=lambda x: x["id"]):
+            w.writerow([today, r["id"], r.get("name"), r.get("title"),
+                        r.get("start_time"), r.get("end_time"),
+                        len(r.get("employments") or []), r.get("url")])
+
+
 # ---------------------------------------------------------------------- main
 
 def main():
@@ -231,6 +276,9 @@ def main():
     p.add_argument("--no-detail", action="store_true", help="list pages only")
     p.add_argument("--images", action="store_true", help="download posting body images")
     p.add_argument("--refresh", action="store_true", help="re-fetch details already cached")
+    p.add_argument("--keep-history", action="store_true",
+                   help="retain cached postings that no longer appear in search results")
+    p.add_argument("--new-log", help="append newly discovered postings to this CSV")
     args = p.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -251,8 +299,10 @@ def main():
     log(f"filters: {filters}")
     listings, total = fetch_all_listings(session, filters, args.per_page, args.delay, args.limit)
     log(f"listings: {len(listings)}" + (f" (site reports totalCount={total})" if total else ""))
-    if total and len(listings) != total and not args.limit:
-        log(f"WARNING: got {len(listings)} but site reported {total}")
+    if total and len(listings) < total and not args.limit:
+        log(f"ABORT: got {len(listings)} listings but site reported {total}; "
+            "refusing to write a truncated dataset")
+        return 1
 
     cache = {}
     cache_path = os.path.join(args.out, "postings.jsonl")
@@ -285,12 +335,34 @@ def main():
             fetched = list(ex.map(work, todo))
         records = fetched + [cache[l["id"]] for l in listings if l["id"] in cache]
 
+    today = datetime.now(KST).date().isoformat()
+    listed_ids = {l["id"] for l in listings}
+    new_records = [r for r in records if r["id"] not in cache]
+    for r in records:
+        r.setdefault("first_seen", today)
+
+    if args.keep_history:
+        stale = [r for r in cache.values() if r["id"] not in listed_ids]
+        if stale:
+            log(f"keeping {len(stale)} archived postings no longer in search results")
+        records = records + stale
+
     write_outputs(records, args.out)
     log(f"wrote {len(records)} postings to {args.out}/postings.{{jsonl,csv}} and roles.csv")
+    log(f"NEW today: {len(new_records)}")
+    for r in sorted(new_records, key=lambda x: x["id"]):
+        log(f"  + {r['id']} {r.get('name')} — {r.get('title')} (~{r.get('end_time','')[:10]})")
+
+    if args.new_log:
+        append_new_log(args.new_log, new_records, today)
 
     if args.images:
         download_images(session, records, args.out, args.workers, args.delay)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        sys.exit(main() or 0)
+    except ListPageError as e:
+        log(f"ABORT: {e}")
+        sys.exit(1)

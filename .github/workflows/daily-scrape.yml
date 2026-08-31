@@ -1,0 +1,75 @@
+name: Daily scrape
+
+on:
+  schedule:
+    # 21:10 UTC = 06:10 KST daily. GitHub's scheduler often runs late under load.
+    - cron: "10 21 * * *"
+  workflow_dispatch:
+    inputs:
+      refresh:
+        description: "Re-fetch details for every posting (slow, ~10 min)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Scrape (대기업 · 신입)
+        run: |
+          python scrape.py \
+            --out data \
+            --keep-history \
+            --new-log data/new-postings.csv \
+            --workers 3 --delay 1.0 \
+            ${{ inputs.refresh && '--refresh' || '' }} \
+            2>&1 | tee run.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### jasoseol daily scrape — $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')"
+            echo
+            grep -E "^(listings:|NEW today:|keeping )" run.log || true
+            echo
+            NEW=$(grep -E "^  \+ " run.log || true)
+            if [ -n "$NEW" ]; then
+              echo "#### New postings"
+              echo '```'
+              echo "$NEW"
+              echo '```'
+            else
+              echo "_No new postings today._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit changes
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- data; then
+            echo "No data changes to commit."
+            exit 0
+          fi
+          NEW_COUNT=$(grep -cE "^  \+ " run.log || true)
+          TOTAL=$(wc -l < data/postings.jsonl | tr -d ' ')
+          git add data
+          git commit -m "data: ${NEW_COUNT:-0} new posting(s), ${TOTAL} total ($(TZ=Asia/Seoul date '+%Y-%m-%d'))"
+          git push

@@ -10,6 +10,23 @@ Pulls job postings from jasoseol.com (자소설닷컴).
 
 Reruns are resumable: ids already in `data/postings.jsonl` are skipped (`--refresh` to force).
 
+## Daily automation
+
+`.github/workflows/daily-scrape.yml` runs at **06:10 KST every day** (`10 21 * * *` UTC)
+and can also be triggered from the Actions tab. Each run:
+
+1. scrapes with the same filters (`--division 1 --business-types big_business`),
+2. fetches details only for postings it has never seen,
+3. keeps postings that have since closed and dropped out of search (`--keep-history`),
+4. appends new ones to `data/new-postings.csv` with a `first_seen` date,
+5. commits `data/` back to this repo, and lists the new postings in the run summary.
+
+`data/` is committed on purpose — `postings.jsonl` **is** the run-to-run state. Because
+cached postings are never re-fetched, daily diffs are just the added lines.
+
+To see what arrived on a given day: `grep ^2026-09-01 data/new-postings.csv`,
+or read the Actions run summary.
+
 ## How it works
 No public search API — `/api/v1/employment_companies` ignores the filter params.
 Instead both phases parse the SSR `__NEXT_DATA__` blob:
@@ -25,6 +42,14 @@ Instead both phases parse the SSR `__NEXT_DATA__` blob:
 - `postings.csv` — one row per posting (roles joined with `|`)
 - `roles.csv` — one row per 직무 (5,617 rows for the 580 postings)
 - `images/` — posting body images, with `--images`
+
+## Failure modes handled
+- `/search` intermittently server-renders with an empty react-query cache. That is
+  retried (4x, exponential backoff); if a page still can't be parsed, the run aborts
+  non-zero rather than committing a truncated dataset.
+- A short listing run (fewer rows than the site's own `totalCount`) also aborts.
+- 429/5xx on detail pages retry with backoff; a posting that still fails is skipped
+  and simply retried on the next daily run.
 
 ## Caveat
 The posting body is an image, not text: 548 of 580 postings have `content` = a single

@@ -1,6 +1,6 @@
 .venv/
-data/
 data-test/
+run.log
 __pycache__/
 *.pyc
 .DS_Store
