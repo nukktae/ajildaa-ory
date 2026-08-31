@@ -110,8 +110,8 @@
            placeholder="Search company, posting, or role — e.g. 반도체, LG, 마케팅"
            aria-label="Search postings">
     <div class="row-controls" role="group" aria-label="Filter by status">
-      <button class="chip" data-f="all"    aria-pressed="true">All</button>
-      <button class="chip" data-f="open"   aria-pressed="false">Open</button>
+      <button class="chip" data-f="all"    aria-pressed="false">All</button>
+      <button class="chip" data-f="open"   aria-pressed="true">Open</button>
       <button class="chip" data-f="urgent" aria-pressed="false">Closing in 7 days</button>
       <button class="chip" data-f="closed" aria-pressed="false">Closed</button>
       <span class="spacer"></span>
@@ -138,7 +138,8 @@ const KST_OFFSET = 9 * 60 * 60 * 1000;
 const PAGE = 60;                       // render in chunks; 580 rows at once is wasted work
 
 let all = [], view = [], shown = PAGE;
-const state = { q: "", f: "all", sort: "deadline" };
+const DEFAULT_FILTER = "open";          // closed postings are archive, not action
+const state = { q: "", f: DEFAULT_FILTER, sort: "deadline" };
 
 const $ = s => document.querySelector(s);
 const list = $("#list"), countEl = $("#count"), clearBtn = $("#clear"), moreBtn = $("#more");
@@ -185,7 +186,7 @@ function apply(){
 }
 
 function render(){
-  const active = state.q || state.f !== "all";
+  const active = state.q || state.f !== DEFAULT_FILTER;
   countEl.textContent = view.length === all.length
     ? `${all.length} postings`
     : `${view.length} of ${all.length} postings`;
@@ -231,9 +232,9 @@ function escapeHtml(s){
 }
 
 window.__clear = () => {
-  state.q = ""; state.f = "all"; $("#q").value = "";
+  state.q = ""; state.f = DEFAULT_FILTER; $("#q").value = "";
   document.querySelectorAll(".chip").forEach(c =>
-    c.setAttribute("aria-pressed", String(c.dataset.f === "all")));
+    c.setAttribute("aria-pressed", String(c.dataset.f === DEFAULT_FILTER)));
   apply();
 };
 

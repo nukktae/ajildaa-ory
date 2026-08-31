@@ -20,8 +20,8 @@ built from `data/postings.jsonl` (reloaded automatically when the file changes).
 The whole dataset ships once, so search / filter / sort are instant client-side —
 no request per keystroke (Doherty threshold, <400ms).
 
-UI: search across company + posting + role, status chips (Open / Closing in 7 days /
-Closed), sort by deadline / recency / views / role count, a result count that is always
+UI: opens on **Open postings only** (closed ones are archive, not action — reach them
+via the All / Closed chips). Search across company + posting + role, status chips, sort by deadline / recency / views / role count, a result count that is always
 visible (including zero), one-click filter reset, and an empty state that offers a way out.
 White background, no borders anywhere — grouping comes from fills and spacing, and focus
 is shown by a fill change rather than a ring.
